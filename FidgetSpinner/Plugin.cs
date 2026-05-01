@@ -4,6 +4,7 @@ using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility.Signatures;
+using System;
 
 namespace FidgetSpinner;
 
@@ -34,19 +35,29 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(CommandName);
     }
 
-    private void OnCommand(string command, string args)
+    private void OnCommand(string command, string argstr)
     {
-        if (args == "left")
+        turnOverride = null;
+
+        var args = argstr.Split(' ');
+        if (args.Length > 0)
         {
-            turnOverride = 0.5f;
+            if (args[0] == "left")
+            {
+                turnOverride = 1;
+            }
+            else if (args[0] == "right")
+            {
+                turnOverride = -1;
+            }
         }
-        else if (args == "right")
+        if (args.Length == 2)
         {
-            turnOverride = -1;
-        }
-        else
-        {
-            turnOverride = null;
+            if (float.TryParse(args[1], out var multiplier))
+            {
+                // Clamp [-1, 1] because the game doesn't let you go over that.
+                turnOverride *= MathF.Max(MathF.Min(multiplier, 1), -1);
+            }
         }
     }
 
