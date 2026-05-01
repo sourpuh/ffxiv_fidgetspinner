@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--DON'T FORGET TO UPDATE THE DYNAMIS VERSION TOO-->
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+    <PropertyGroup>
+        <Version>0.0.0.0</Version>
+        <Description>spin</Description>
+        <PackageProjectUrl>https://github.com/sourpuh/ffxiv_fidgetspinner</PackageProjectUrl>
+        <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+</Project>
