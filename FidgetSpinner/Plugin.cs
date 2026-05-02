@@ -15,6 +15,7 @@ public sealed class Plugin : IDalamudPlugin
     [StructLayout(LayoutKind.Explicit, Size = 0x140)]
     public struct MoveControllerSubMemberForMine
     {
+        // Only set for Standard control scheme.
         [FieldOffset(0x121)] public byte RightClickCameraAiming;
     }
 
@@ -22,7 +23,6 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static ISigScanner SigScanner { get; private set; } = null!;
     [PluginService] internal static IGameInteropProvider Hooker { get; private set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
-    [PluginService] internal static IChatGui Chat { get; private set; } = null!;
 
     private Stopwatch spinTimer = new();
 
@@ -39,7 +39,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "`/fspin left` or `/fspin right`"
+            HelpMessage = "`/fspin left` or `/fspin right`.\nOptionally include a decimal multiplier (0, 1] to adjust spin speed like `/fspin left 0.5` for half speed."
         });
         var rmiWalkIsInputEnabled1Addr = SigScanner.ScanText("E8 ?? ?? ?? ?? 84 C0 75 10 38 43 3C");
         var rmiWalkIsInputEnabled2Addr = SigScanner.ScanText("E8 ?? ?? ?? ?? 84 C0 75 03 88 47 3F");
@@ -76,7 +76,7 @@ public sealed class Plugin : IDalamudPlugin
             if (float.TryParse(args[1], out var multiplier))
             {
                 // Clamp [-1, 1] because the game doesn't let you go over that.
-                turnOverride *= MathF.Max(MathF.Min(multiplier, 1), -1);
+                turnOverride *= clamp(multiplier);
             }
         }
     }
@@ -97,11 +97,12 @@ public sealed class Plugin : IDalamudPlugin
             if (player.Rotation < 0 && prevRotation > 0)
             {
                 // At normal spin speed, a full rotation should take about 2.66 seconds.
-                // If the nonu is spinning faster than 2.5s, activate the kill switch because something is broken.
-                if (spinTimer.IsRunning && spinTimer.Elapsed.TotalSeconds < 2.5)
+                // When using legacy input, spinning is about 5x faster. Until I figure out why that is, just scale down the spin speed to about 2.66 seconds.
+                var elapsed = spinTimer.Elapsed.TotalSeconds;
+                if (spinTimer.IsRunning && elapsed < 2.5)
                 {
-                    Chat.PrintError($"Fidget Spinning too fast ({spinTimer.Elapsed.TotalSeconds}s)! Kill switch activated! Try restarting the plugin?");
-                    clearTurnOverride();
+                    var multiplier = (float)(elapsed / 2.66);
+                    turnOverride = clamp(turnOverride.Value * multiplier);
                 }
                 spinTimer.Restart();
             }
@@ -119,5 +120,10 @@ public sealed class Plugin : IDalamudPlugin
     {
         spinTimer.Stop();
         turnOverride = null;
+    }
+
+    private float clamp(float value)
+    {
+        return MathF.Max(MathF.Min(value, 1), -1);
     }
 }
