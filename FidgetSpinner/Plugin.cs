@@ -5,7 +5,6 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility.Signatures;
 using System;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace FidgetSpinner;
@@ -22,16 +21,19 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
     [PluginService] internal static ISigScanner SigScanner { get; private set; } = null!;
     [PluginService] internal static IGameInteropProvider Hooker { get; private set; } = null!;
-    [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
-
-    private Stopwatch spinTimer = new();
 
     private unsafe delegate bool RMIWalkIsInputEnabled(void* self);
     private readonly RMIWalkIsInputEnabled _rmiWalkIsInputEnabled1;
     private readonly RMIWalkIsInputEnabled _rmiWalkIsInputEnabled2;
+    private unsafe delegate float RMIWalkTurnSpeed(MoveControllerSubMemberForMine* self, void* unused, byte* isTurningOverride);
+    [Signature("E8 ?? ?? ?? ?? 48 8B 47 20 0F 28 C8", DetourName = nameof(TurnSpeedDetour))]
+    private readonly Hook<RMIWalkTurnSpeed> turnSpeedHook;
     private unsafe delegate void RMIWalkDelegate(MoveControllerSubMemberForMine* self, float* sumLeft, float* sumForward, float* sumTurnLeft, byte* haveBackwardOrStrafe, byte* a6, byte bAdditiveUnk);
     [Signature("E8 ?? ?? ?? ?? 80 7B 3E 00 48 8D 3D", DetourName = nameof(RMIWalkDetour))]
     private readonly Hook<RMIWalkDelegate> rmiWalkHook;
+
+    private const float TargetTurnSpeed = 1.5f * 1.57f;
+    private const float MaxSpeedMultiplier = 10f;
 
     private const string CommandName = "/fspin";
 
@@ -39,19 +41,19 @@ public sealed class Plugin : IDalamudPlugin
     {
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "`/fspin left` or `/fspin right`.\nOptionally include a decimal multiplier (0, 1] to adjust spin speed like `/fspin left 0.5` for half speed."
+            HelpMessage = "`/fspin left` or `/fspin right`.\nOptionally include a decimal multiplier (0, 10] to adjust spin speed like `/fspin left 0.5` for half speed or `/fspin right 3` for triple speed."
         });
         var rmiWalkIsInputEnabled1Addr = SigScanner.ScanText("E8 ?? ?? ?? ?? 84 C0 75 10 38 43 3C");
         var rmiWalkIsInputEnabled2Addr = SigScanner.ScanText("E8 ?? ?? ?? ?? 84 C0 75 03 88 47 3F");
         _rmiWalkIsInputEnabled1 = Marshal.GetDelegateForFunctionPointer<RMIWalkIsInputEnabled>(rmiWalkIsInputEnabled1Addr);
         _rmiWalkIsInputEnabled2 = Marshal.GetDelegateForFunctionPointer<RMIWalkIsInputEnabled>(rmiWalkIsInputEnabled2Addr);
         Hooker.InitializeFromAttributes(this);
-        rmiWalkHook?.Enable();
     }
 
     public void Dispose()
     {
         rmiWalkHook?.Dispose();
+        turnSpeedHook?.Dispose();
         CommandManager.RemoveHandler(CommandName);
     }
 
@@ -75,13 +77,19 @@ public sealed class Plugin : IDalamudPlugin
         {
             if (float.TryParse(args[1], out var multiplier))
             {
-                // Clamp [-1, 1] because the game doesn't let you go over that.
                 turnOverride *= clamp(multiplier);
             }
         }
+        if (turnOverride == 0)
+        {
+            turnOverride = null;
+        }
+        if (turnOverride != null)
+        {
+            rmiWalkHook?.Enable();
+        }
     }
 
-    float prevRotation = 0;
     float? turnOverride = null;
 
     private unsafe void RMIWalkDetour(MoveControllerSubMemberForMine* self, float* sumLeft, float* sumForward, float* sumTurnLeft, byte* haveBackwardOrStrafe, byte* a6, byte bAdditiveUnk)
@@ -91,39 +99,37 @@ public sealed class Plugin : IDalamudPlugin
         {
             clearTurnOverride();
         }
-        var player = ObjectTable.LocalPlayer;
-        if (turnOverride != null && player != null)
-        {
-            if (player.Rotation < 0 && prevRotation > 0)
-            {
-                // At normal spin speed, a full rotation should take about 2.66 seconds.
-                // When using legacy input, spinning is about 5x faster. Until I figure out why that is, just scale down the spin speed to about 2.66 seconds.
-                var elapsed = spinTimer.Elapsed.TotalSeconds;
-                if (spinTimer.IsRunning && elapsed < 2.5)
-                {
-                    var multiplier = (float)(elapsed / 2.66);
-                    turnOverride = clamp(turnOverride.Value * multiplier);
-                }
-                spinTimer.Restart();
-            }
-            prevRotation = player.Rotation;
-        }
 
         var movementAllowed = bAdditiveUnk == 0 && _rmiWalkIsInputEnabled1(self) && _rmiWalkIsInputEnabled2(self);
         if (turnOverride != null && movementAllowed)
         {
-            *sumTurnLeft = turnOverride.Value;
+            turnSpeedHook.Enable();
+            *sumTurnLeft = MathF.Sign(turnOverride.Value);
         }
+        else
+        {
+            turnSpeedHook.Disable();
+        }
+    }
+
+    private unsafe float TurnSpeedDetour(MoveControllerSubMemberForMine* self, void* unused, byte* isTurningOverride)
+    {
+        if (turnOverride != null)
+        {
+            return TargetTurnSpeed * MathF.Abs(turnOverride.Value);
+        }
+        return turnSpeedHook.Original(self, unused, isTurningOverride);
     }
 
     private void clearTurnOverride()
     {
-        spinTimer.Stop();
+        rmiWalkHook?.Disable();
+        turnSpeedHook?.Disable();
         turnOverride = null;
     }
 
     private float clamp(float value)
     {
-        return MathF.Max(MathF.Min(value, 1), -1);
+        return Math.Clamp(value, -MaxSpeedMultiplier, MaxSpeedMultiplier);
     }
 }

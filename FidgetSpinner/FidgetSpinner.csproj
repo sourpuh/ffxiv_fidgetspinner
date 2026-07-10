@@ -2,7 +2,7 @@
 <!--DON'T FORGET TO UPDATE THE DYNAMIS VERSION TOO-->
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
     <PropertyGroup>
-        <Version>0.0.0.3</Version>
+        <Version>0.0.0.4</Version>
         <Description>spin</Description>
         <PackageProjectUrl>https://github.com/sourpuh/ffxiv_fidgetspinner</PackageProjectUrl>
         <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
